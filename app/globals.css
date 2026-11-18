@@ -22,7 +22,13 @@
   background: #b8a7ed;
   color: #241d36;
   font: italic 700 23px/1 Georgia, serif;
+  text-decoration: none;
 }
+.brand-icon:hover { background: #d2c5f8; }
+.brand-icon:focus-visible { outline: 2px solid #b9aaf1; outline-offset: 3px; }
+.board-unavailable { display: grid; min-height: 100dvh; place-content: center; justify-items: center; gap: 14px; padding: 20px; background: var(--bg); color: var(--text); text-align: center; }
+.board-unavailable h1 { margin: 0; font-size: 18px; }
+.board-unavailable a { color: var(--purple); }
 .board-name {
   display: flex;
   flex: 1;

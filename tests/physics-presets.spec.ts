@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test'
 test('physics presets create editable board objects that survive reload', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', error => errors.push(error.message))
-  await page.goto('/')
+  await page.goto('/board')
   const spring = page.getByRole('button', { name: 'Пружина' })
   await expect(spring).toBeVisible()
   const before = await page.locator('[data-shape-id]').count()
@@ -21,7 +21,7 @@ test('physics presets create editable board objects that survive reload', async 
 
 test('preset list remains usable on a shorter screen', async ({ page }) => {
   await page.setViewportSize({ width: 1100, height: 700 })
-  await page.goto('/')
+  await page.goto('/board')
   const lens = page.getByRole('button', { name: 'Линза' })
   await lens.scrollIntoViewIfNeeded()
   await lens.click()

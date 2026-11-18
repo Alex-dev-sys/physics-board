@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { deflateSync } from 'node:zlib'
 
 test('media windows can be focused, pinned, minimized and restored', async ({page})=>{
- await page.goto('/')
+ await page.goto('/board')
  await expect(page.locator('.tl-canvas')).toBeVisible()
  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/a4sAAAAASUVORK5CYII=','base64')
  await page.locator('input[type=file]').setInputFiles([
@@ -50,7 +50,7 @@ test('closing a file releases its temporary URL but minimizing keeps it availabl
   ;(window as unknown as {revokedUrls:string[]}).revokedUrls=[]
   URL.revokeObjectURL=(url:string)=>{(window as unknown as {revokedUrls:string[]}).revokedUrls.push(url);revoke(url)}
  })
- await page.goto('/')
+ await page.goto('/board')
  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/a4sAAAAASUVORK5CYII=','base64')
  await page.locator('input[type=file]').setInputFiles({name:'task.png',mimeType:'image/png',buffer:png})
  const window=page.locator('.media-window').filter({hasText:'task.png'})
@@ -68,7 +68,7 @@ test('closing a file releases its temporary URL but minimizing keeps it availabl
 })
 
 test('material window controls stay reachable after switching to a narrow viewport', async ({ page }) => {
- await page.goto('/')
+ await page.goto('/board')
  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/a4sAAAAASUVORK5CYII=', 'base64')
  await page.locator('input[type=file]').setInputFiles({ name: 'phone.png', mimeType: 'image/png', buffer: png })
  const material = page.locator('.media-window')
@@ -116,7 +116,7 @@ test('a high-resolution PDF scan inserts a real image on the board', async ({ pa
  pieces.push(Buffer.from('xref\n0 6\n0000000000 65535 f \n' + offsets.join('') +
   'trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n' + offset + '\n%%EOF\n'))
 
- await page.goto('/')
+ await page.goto('/board')
  await expect(page.locator('.tl-canvas')).toBeVisible()
  let releaseWorker: () => void
  const workerReady = new Promise<void>(resolve => { releaseWorker = resolve })

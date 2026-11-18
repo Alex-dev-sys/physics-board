@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 
 test('dashed and solid line styles apply to figures and arrows',async({page})=>{
- await page.goto('/')
+ await page.goto('/board')
  const shapes=page.locator('[data-shape-id]')
  const ids=()=>shapes.evaluateAll(elements=>Array.from(new Set(elements.map(element=>element.getAttribute('data-shape-id')))))
  await expect.poll(()=>shapes.count()).toBeGreaterThanOrEqual(10)

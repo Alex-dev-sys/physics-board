@@ -1,4 +1,6 @@
 'use client'
+import Link from 'next/link'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { Tldraw, Editor, createShapesForAssets, DEFAULT_MAX_ASSET_SIZE, DefaultColorStyle, DefaultDashStyle, DefaultSizeStyle, GeoShapeGeoStyle, react as reactToState, toRichText, useEditor, useValue, type TLGridProps } from 'tldraw'
 import { addPdfToBoard, pdfShapeUtils } from './pdf-shape'
@@ -11,6 +13,8 @@ import { createCloudRoom, initializeCloudRoom } from './cloud/rooms'
 import { materialTypes } from './cloud/material-data'
 import type { CloudSyncStatus } from './cloud/update-log'
 import type { CloudMaterials, SharedMaterial } from './cloud/materials'
+import { defaultBoard, defaultBoardId, editorPath, markBoardOpened, readBoard, readProfileName, roomToken, sharedBoardTitle, type WorkspaceBoard } from './workspace-data'
+import { watchPersonalBoard } from './personal-board-persistence'
 import { ArrowDownLeft, ArrowLeft, ArrowRight, ArrowUpRight, Check, ChevronLeft, ChevronRight, Circle, Download, Eraser, FileText, Grid2X2, Hand, Highlighter, Image as ImageIcon, Link2, LockKeyhole, Minus, MoreHorizontal, MousePointer2, MoveUpRight, PanelRightClose, Paperclip, Pen, Pin, PinOff, Plus, Redo2, Search, Settings2, Shapes, Sparkles, Square, Trash2, Type, Undo2, Upload, Users, X, ZoomIn, ZoomOut } from 'lucide-react'
 
 type Media = { id:string; scope?:string; name:string; url:string; type:string; minimized:boolean; pinned?:boolean; x:number; y:number; shared?:boolean; path?:string; refreshAt?:number; upload?:'uploading'|'failed' }
@@ -32,12 +36,37 @@ function BoardBackground(){
  return <><div className="tl-background"/><NotebookGrid {...camera} size={size}/></>
 }
 const canvasComponents={Background:BoardBackground,Grid:null}
-export default function Board(){
- const [editor,setEditor]=useState<Editor|null>(null), [active,setActive]=useState('select'), [color,setColor]=useState('black'), [background,setBackground]=useState('dark'), [menu,setMenu]=useState<string|null>(null), [size,setSize]=useState('m'), [grid,setGrid]=useState(true), [panel,setPanel]=useState(true), [media,setMedia]=useState<Media[]>([]), [dragging,setDragging]=useState(false), [notice,setNotice]=useState(''), [room,setRoom]=useState<string|null>(()=>{if(typeof window==='undefined'||process.env.NODE_ENV!=='development')return null;const value=new URLSearchParams(window.location.hash.slice(1)).get('room');return value&&/^[a-f0-9]{64}$/.test(value)?value:null}), [creatingRoom,setCreatingRoom]=useState(false)
- const [cloudToken,setCloudToken]=useState<string|null>(()=>{if(typeof window==='undefined')return null;const value=new URLSearchParams(window.location.hash.slice(1)).get('cloud');return value&&/^[a-f0-9]{64}$/.test(value)?value:null}), [cloudStatus,setCloudStatus]=useState<CloudSyncStatus|'loading'|'failed'>('loading'), [shareOpen,setShareOpen]=useState(false)
+export default function BoardRoute(){
+ const boardId = useSearchParams().get('id') ?? defaultBoardId
+ const board = readBoard(boardId)
+ const [fragment, setFragment] = useState(() => location.hash)
+ useEffect(() => {
+  const followFragment = () => setFragment(location.hash)
+  window.addEventListener('hashchange', followFragment)
+  return () => window.removeEventListener('hashchange', followFragment)
+ }, [])
+ if (board?.kind === 'personal') return <Board key={board.id + fragment} personalBoard={board}/>
+ if (roomToken(fragment) || process.env.NODE_ENV === 'development' && roomToken(fragment, 'room')) {
+  return <Board key={defaultBoardId + fragment} personalBoard={readBoard(defaultBoardId) ?? defaultBoard}/>
+ }
+ return <main className="board-unavailable">
+  <h1>Доска недоступна в этом браузере</h1>
+  <Link href="/">Мои доски</Link>
+ </main>
+}
+
+function Board({personalBoard}:{personalBoard: WorkspaceBoard}){
+ const router = useRouter()
+ const persistenceKey = personalBoard.id === defaultBoardId ? 'physics-board-v1' : `physics-board-v1-${personalBoard.id}`
+ const [editor,setEditor]=useState<Editor|null>(null), [active,setActive]=useState('select'), [color,setColor]=useState('black'), [background,setBackground]=useState('dark'), [menu,setMenu]=useState<string|null>(null), [size,setSize]=useState('m'), [grid,setGrid]=useState(true), [panel,setPanel]=useState(true), [media,setMedia]=useState<Media[]>([]), [dragging,setDragging]=useState(false), [notice,setNotice]=useState(''), [creatingRoom,setCreatingRoom]=useState(false)
+ const [room,setRoom]=useState(()=>process.env.NODE_ENV === 'development' ? roomToken(location.hash, 'room') : null)
+ const [cloudToken,setCloudToken]=useState(()=>roomToken(location.hash)), [cloudStatus,setCloudStatus]=useState<CloudSyncStatus|'loading'|'failed'>('loading'), [shareOpen,setShareOpen]=useState(false)
+ const [cloudTitle,setCloudTitle]=useState(()=>cloudToken ? readBoard(cloudToken)?.title ?? sharedBoardTitle : sharedBoardTitle)
  const [snapToGrid,setSnapToGrid]=useState(true),[gridStyle,setGridStyle]=useState<'notebook'|'graph'>('notebook'),[eraserMode,setEraserMode]=useState<'stroke'|'partial'>('stroke'),[licenseBlocked,setLicenseBlocked]=useState(false)
  const [dashStyle,setDashStyle]=useState<'draw'|'solid'|'dashed'>('draw')
  const personalEditor=useRef<Editor|null>(null)
+ const personalPersistence=useRef<ReturnType<typeof watchPersonalBoard> | null>(null)
+ const leavingForWorkspace=useRef(false)
  const canvasContainer=useRef<HTMLDivElement>(null)
  const retryMissingMaterials=useRef<(()=>void)|null>(null)
  const previousMediaUrls=useRef(new Set<string>())
@@ -109,14 +138,20 @@ export default function Board(){
  const mount=useCallback((ed:Editor)=>{
   if(!ed.root.children?.['pixel-eraser'])ed.root.addChild(PixelEraser)
   ed.updateInstanceState({isGridMode:localStorage.getItem('physics-board-grid-snap')!=='false'})
+  const profileName=readProfileName()
+  if(profileName)ed.user.updateUserPreferences({name:profileName})
   setEditor(ed)
   if(new URLSearchParams(location.search).has('pdf'))ed.navigateToDeepLink({param:'pdf'})
  },[])
  const mountPersonal=useCallback((ed:Editor)=>{
   personalEditor.current=ed
+  const persistence=watchPersonalBoard(ed,persistenceKey)
+  personalPersistence.current=persistence
   mount(ed)
-  const shouldSeed=localStorage.getItem('physics-board-initialized-v1')!=='1'&&ed.getCurrentPageShapes().length===0
-  localStorage.setItem('physics-board-initialized-v1','1')
+  markBoardOpened(personalBoard)
+  const isDefault=personalBoard.id===defaultBoardId
+  const shouldSeed=isDefault&&localStorage.getItem('physics-board-initialized-v1')!=='1'&&ed.getCurrentPageShapes().length===0
+  if(isDefault)localStorage.setItem('physics-board-initialized-v1','1')
   if(shouldSeed){
     ed.createShapes([
       {type:'text',x:170,y:130,props:{richText:toRichText('Движение по наклонной плоскости'),size:'l',color:'black'}},
@@ -131,7 +166,14 @@ export default function Board(){
       {type:'text',x:650,y:310,props:{richText:toRichText('ΣF = ma\n\nN = mg cos α\n\nFₓ = mg sin α'),color:'black',size:'l'}}
     ]); ed.zoomToFit({animation:{duration:0}})
    }
- },[mount])
+  return ()=>{
+   persistence.dispose()
+   if(personalEditor.current===ed){
+    personalEditor.current=null
+    personalPersistence.current=null
+   }
+  }
+ },[mount,persistenceKey,personalBoard])
  const choose=(id:string)=>{setActive(id);editor?.setCurrentTool(id==='eraser'&&eraserMode==='partial'?'pixel-eraser':id);setMenu(['draw','highlight','eraser','arrow','geo','text'].includes(id)?id:null)}
  const addFiles=(files:FileList|File[], drop?:{x:number;y:number})=>{
   const accepted=Array.from(files).filter(file=>isPdfFile(file)||(cloudToken?materialTypes.has(file.type):file.type.startsWith('image/')))
@@ -261,7 +303,7 @@ export default function Board(){
   await insertImage(image)
  }
  const stamp=(kind:Preset)=>{if(!editor)return;insertPhysicsPreset(editor,kind);setActive('select');setMenu(null);setNotice('Объект добавлен на доску')}
- const shareLocalRoom=async()=>{if(!editor||creatingRoom)return;setCreatingRoom(true);try{const token=room||await createLocalRoom(editor);const link=`${location.origin}${location.pathname}#room=${token}`;if(!room){history.replaceState(null,'',link);setEditor(null);setRoom(token)}try{await navigator.clipboard.writeText(link);setNotice('Ссылка скопирована. Комната работает только на этом компьютере.')}catch{setNotice('Комната открыта. Скопируйте адрес из строки браузера.')}}catch(error){setNotice(error instanceof Error?error.message:'Не удалось создать локальную комнату')}finally{setCreatingRoom(false)}}
+ const shareLocalRoom=async()=>{if(!editor||creatingRoom)return;setCreatingRoom(true);try{const token=room||await createLocalRoom(editor);const hash='#room='+token;const link=location.origin+editorPath+hash;if(!room){history.replaceState(null,'',location.pathname+location.search+hash);setEditor(null);setRoom(token)}try{await navigator.clipboard.writeText(link);setNotice('Ссылка скопирована. Комната работает только на этом компьютере.')}catch{setNotice('Комната открыта. Скопируйте адрес из строки браузера.')}}catch(error){setNotice(error instanceof Error?error.message:'Не удалось создать локальную комнату')}finally{setCreatingRoom(false)}}
  const leaveRoom=()=>{
   history.replaceState(null,'',location.pathname+location.search)
   pendingCloudShare.current=false
@@ -302,6 +344,7 @@ export default function Board(){
    setEditor(null)
    setRoom(null)
    history.replaceState(null,'',location.pathname+location.search+'#cloud='+created.token)
+   setCloudTitle(personalBoard.title)
    setCloudToken(created.token)
   }catch(error){
    setCreatingRoom(false)
@@ -310,6 +353,7 @@ export default function Board(){
  }
  const cloudReady=(api:CloudMaterials)=>{
   materialApi.current=api
+  if(cloudToken)markBoardOpened({id:cloudToken,kind:'cloud',title:cloudTitle})
   const sharing=pendingCloudShare.current
   const existing=mediaRef.current.filter(item=>item.scope===cloudToken&&!item.shared&&!item.upload)
   void (async()=>{
@@ -331,17 +375,30 @@ export default function Board(){
  }
  const cloudState=(status:CloudSyncStatus|'loading'|'failed')=>{setCloudStatus(status);if(status==='failed'){setCreatingRoom(false);pendingCloudShare.current=false}}
  const cloudLabel=cloudStatus==='saved'?'Сохранено в облаке':cloudStatus==='syncing'?'Сохранение…':cloudStatus==='offline'?'Нет соединения':cloudStatus==='error'?'Ошибка сохранения':cloudStatus==='failed'?'Ошибка подключения':'Подключение…'
+ const cloudLink=cloudToken ? `${location.origin}${editorPath}#cloud=${cloudToken}` : ''
+ async function openWorkspace() {
+  if(leavingForWorkspace.current)return
+  leavingForWorkspace.current=true
+  try{
+   await personalPersistence.current?.flush()
+   router.push('/')
+  }catch{
+   setNotice('Не удалось сохранить доску перед выходом. Попробуйте ещё раз.')
+  }finally{
+   leavingForWorkspace.current=false
+  }
+ }
  return <main className="workspace" data-background={background} data-grid={grid ? "visible" : "hidden"} data-grid-style={gridStyle} onDragEnter={e=>{e.preventDefault();dragDepth.current++;setDragging(true)}} onDragOver={e=>e.preventDefault()} onDragLeave={e=>{e.preventDefault();dragDepth.current--;if(dragDepth.current<=0){dragDepth.current=0;setDragging(false)}}} onDropCapture={e=>{dragDepth.current=0;setDragging(false);if(!Array.from(e.dataTransfer.files).some(isPdfFile))return;e.preventDefault();e.stopPropagation();addFiles(e.dataTransfer.files,{x:e.clientX,y:e.clientY})}} onDrop={e=>{e.preventDefault();if(e.dataTransfer.files.length)addFiles(e.dataTransfer.files)}}>
   <div className="canvas" ref={canvasContainer}>
    {(!room&&!cloudToken||personalEditor.current)&&<div className="personal-canvas" inert={!!(room||cloudToken)} style={{visibility:room||cloudToken?'hidden':undefined}}>
-    <Tldraw licenseKey={process.env.NEXT_PUBLIC_TLDRAW_LICENSE_KEY} hideUi components={canvasComponents} persistenceKey="physics-board-v1" shapeUtils={pdfShapeUtils} onMount={mountPersonal}/>
+    <Tldraw licenseKey={process.env.NEXT_PUBLIC_TLDRAW_LICENSE_KEY} hideUi components={canvasComponents} persistenceKey={persistenceKey} shapeUtils={pdfShapeUtils} onMount={mountPersonal}/>
    </div>}
    {cloudToken?<CloudCanvas key={cloudToken} token={cloudToken} onMount={mount} components={canvasComponents} onStatus={cloudState} onReady={cloudReady} onMaterials={receiveMaterials}/>:room?<SyncCanvas token={room} onMount={mount} components={canvasComponents}/>:null}
   </div>
   <header className="topbar">
-   <span className="brand-icon" aria-hidden="true">φ</span>
+   <Link href="/" className="brand-icon" title="Мои доски" aria-label="Мои доски" onNavigate={event=>{event.preventDefault();void openWorkspace()}}>φ</Link>
    <div className="board-name">
-    <h1>Доска по физике</h1>
+    <h1>{cloudToken ? cloudTitle : personalBoard.title}</h1>
     <span className="board-status" role="status" data-status={cloudToken ? cloudStatus : room ? 'local' : 'saved'}>
      <span className="status-dot" aria-hidden="true"/>
      <span>{cloudToken ? cloudLabel : room ? 'Комната на этом компьютере' : 'Сохранено на устройстве'}</span>
@@ -373,7 +430,7 @@ export default function Board(){
   {media.map(m=><div className="media-window glass" key={m.id} onPointerDownCapture={e=>{if(!(e.target as HTMLElement).closest('button'))focusMedia(m.id)}} onClickCapture={e=>{if((e.target as HTMLElement).closest('button'))focusMedia(m.id)}} style={{'--media-x':m.x+'px','--media-y':m.y+'px',zIndex:m.pinned?32:30,display:m.minimized?'none':undefined} as React.CSSProperties}><div className="media-header" onPointerDown={e=>move(e,m.id)}><FileText size={16}/><strong>{m.name}</strong>{m.upload==='uploading'&&<span className="media-upload">Загрузка…</span>}{m.upload==='failed'&&<button className="retry-upload" onClick={()=>void retryMaterial(m).catch(error=>setNotice(error.message))}>Повторить загрузку</button>}<button title={m.pinned?'Открепить окно':'Закрепить поверх окон'} aria-label={m.pinned?'Открепить окно':'Закрепить поверх окон'} aria-pressed={!!m.pinned} onClick={()=>patch(m.id,{pinned:!m.pinned})}>{m.pinned?<PinOff size={16}/>:<Pin size={16}/>}</button><button title="Свернуть" onClick={()=>patch(m.id,{minimized:true})}><Minus size={16}/></button><button title={m.shared?'Закрыть для всех':'Закрыть'} onClick={()=>closeMedia(m.id)}><X size={16}/></button></div><div className="image-preview"><img src={m.url} alt={m.name}/></div><div className="media-footer">Изображение <button onClick={()=>{void insertLocalImage(m.url).catch(()=>setNotice('Не удалось добавить изображение'))}}>На доску</button></div></div>)}
   {media.some(m=>m.minimized)&&<div className="dock glass">{media.filter(m=>m.minimized).map(m=><button key={m.id} onClick={()=>{patch(m.id,{minimized:false});focusMedia(m.id)}}><FileText size={15}/>{m.name}</button>)}</div>}
   {licenseBlocked&&<div className="license-notice" role="alert"><div><strong>Доска временно недоступна</strong><p>Лицензия редактора не активна. Пожалуйста, сообщите владельцу доски.</p></div></div>}
-  {creatingRoom&&<div className="room-creating" role="status">Создаём комнату и сохраняем материалы…</div>}{shareOpen&&cloudToken&&<div className="modal-backdrop" onClick={()=>setShareOpen(false)}><section className="share-dialog" role="dialog" aria-modal="true" aria-label="Пригласить на доску" onClick={e=>e.stopPropagation()}><div className="formula-heading"><h2>Пригласить на доску</h2><button aria-label="Закрыть" onClick={()=>setShareOpen(false)}><X size={18}/></button></div><p>Любой, у кого есть ссылка, сможет открыть и редактировать эту доску.</p><input aria-label="Ссылка на доску" readOnly value={`${location.origin}${location.pathname}#cloud=${cloudToken}`} onFocus={e=>e.currentTarget.select()}/>{['localhost','127.0.0.1'].includes(location.hostname)&&<p>Сейчас адрес ведёт на этот компьютер. Для доступа с других устройств нужно опубликовать приложение.</p>}<div className="formula-actions"><button onClick={()=>setShareOpen(false)}>Закрыть</button><button className="primary" onClick={()=>{void navigator.clipboard?.writeText(`${location.origin}${location.pathname}#cloud=${cloudToken}`).then(()=>setNotice('Ссылка скопирована')).catch(()=>setNotice('Скопируйте ссылку из поля'))}}>Копировать ссылку</button></div></section></div>}{dragging&&<div className="drop-overlay"><div><Upload size={30}/><strong>Отпустите файл здесь</strong><span>PDF появится на доске</span></div></div>}{notice&&<div className="toast">{notice}</div>}
+  {creatingRoom&&<div className="room-creating" role="status">Создаём комнату и сохраняем материалы…</div>}{shareOpen&&cloudToken&&<div className="modal-backdrop" onClick={()=>setShareOpen(false)}><section className="share-dialog" role="dialog" aria-modal="true" aria-label="Пригласить на доску" onClick={e=>e.stopPropagation()}><div className="formula-heading"><h2>Пригласить на доску</h2><button aria-label="Закрыть" onClick={()=>setShareOpen(false)}><X size={18}/></button></div><p>Любой, у кого есть ссылка, сможет открыть и редактировать эту доску.</p><input aria-label="Ссылка на доску" readOnly value={cloudLink} onFocus={e=>e.currentTarget.select()}/>{['localhost','127.0.0.1'].includes(location.hostname)&&<p>Сейчас адрес ведёт на этот компьютер. Для доступа с других устройств нужно опубликовать приложение.</p>}<div className="formula-actions"><button onClick={()=>setShareOpen(false)}>Закрыть</button><button className="primary" onClick={()=>{void navigator.clipboard?.writeText(cloudLink).then(()=>setNotice('Ссылка скопирована')).catch(()=>setNotice('Скопируйте ссылку из поля'))}}>Копировать ссылку</button></div></section></div>}{dragging&&<div className="drop-overlay"><div><Upload size={30}/><strong>Отпустите файл здесь</strong><span>PDF появится на доске</span></div></div>}{notice&&<div className="toast">{notice}</div>}
  </main>
 }
 

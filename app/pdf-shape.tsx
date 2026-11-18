@@ -7,6 +7,7 @@ import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist'
 import { AssetRecordType, BaseBoxShapeUtil, createShapeId, HTMLContainer, Rectangle2d, useEditor, useValue, type Editor, type VecLike } from 'tldraw'
 import { createPdfAsset, isPdfAsset, pdfMimeType, pdfWidth, type PdfShape } from './pdf-assets'
 import { pdfCardHeight, pdfShapeProps } from './pdf-schema.mjs'
+import { roomToken } from './workspace-data'
 
 function displayHeight({ h, compact }: PdfShape['props']) {
  return compact || !h ? pdfCardHeight : h
@@ -218,6 +219,7 @@ function PdfOnBoard({ shape }: { shape: PdfShape }) {
  const copyLink = async () => {
   try {
    const url = editor.createDeepLink({ to: { type: 'shapes', shapeIds: [id] }, param: 'pdf' })
+   if (roomToken(url.hash) || roomToken(url.hash, 'room')) url.searchParams.delete('id')
    await navigator.clipboard.writeText(url.href)
    setActionMessage('Ссылка скопирована')
   } catch {

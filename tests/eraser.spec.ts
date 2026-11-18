@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 
 test('editor remains available after the license check', async ({page}) => {
- await page.goto(process.env.TEST_BASE_URL || '/')
+ await page.goto(process.env.TEST_BASE_URL || '/board')
  await expect(page.locator('.tl-canvas')).toBeVisible()
  await page.waitForTimeout(6500) // tldraw enforces the production license after five seconds.
  await expect(page.locator('[data-testid="tl-license-expired"]')).toHaveCount(0)
@@ -9,7 +9,7 @@ test('editor remains available after the license check', async ({page}) => {
 })
 
 test('an expired license shows an explanation instead of a blank board', async ({page}) => {
- await page.goto('/')
+ await page.goto('/board')
  await expect(page.locator('.tl-canvas')).toBeVisible()
  await page.locator('.canvas').evaluate(container=>{
   const gate=document.createElement('div')
@@ -23,7 +23,7 @@ test('an expired license shows an explanation instead of a blank board', async (
 
 for (const tool of ['Карандаш','Маркер']) test(`partial eraser splits a ${tool} stroke and undo restores it`, async ({ page }) => {
  await page.setViewportSize({width:1400,height:900})
- await page.goto(process.env.TEST_BASE_URL || '/')
+ await page.goto(process.env.TEST_BASE_URL || '/board')
  const shapes=page.locator('[data-shape-id]')
  const ids=()=>shapes.evaluateAll(elements=>Array.from(new Set(elements.map(element=>element.getAttribute('data-shape-id')))))
  await expect.poll(()=>shapes.count()).toBeGreaterThanOrEqual(10)

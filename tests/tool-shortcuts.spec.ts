@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 
 test('keyboard shortcuts select the tools shown in the toolbar without interrupting text entry',async({page})=>{
- await page.goto('/')
+ await page.goto('/board')
  await expect(page.locator('.tl-canvas')).toBeVisible()
  await page.locator('.tl-canvas').click({position:{x:900,y:850}})
  for(const [key,name] of [['p','Карандаш'],['b','Маркер'],['e','Ластик'],['a','Стрелка'],['r','Фигуры'],['v','Выбор'],['h','Перемещение'],['t','Текст']]){

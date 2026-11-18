@@ -77,7 +77,7 @@ test('main board shares its existing image and synchronizes another browser',asy
   })
  }
  try{
-  await a.goto(process.env.TEST_BASE_URL || '/')
+  await a.goto(process.env.TEST_BASE_URL || '/board')
   await expect(a.getByRole('button',{name:'Пружина'})).toBeVisible()
   const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/a4sAAAAASUVORK5CYII=','base64')
   await a.locator('input[type=file]').setInputFiles({name:'task.png',mimeType:'image/png',buffer:png})
@@ -161,7 +161,7 @@ test('shared PDF opens on both boards, follows pages and inserts a crop',async({
   })
  }
  try{
-  await a.goto(process.env.TEST_BASE_URL || '/')
+  await a.goto(process.env.TEST_BASE_URL || '/board')
   await expect(a.getByRole('button',{name:'Пружина'})).toBeVisible()
   await a.locator('input[type=file]').setInputFiles({name:'problems.pdf',mimeType:'application/pdf',buffer:pdf})
   const pdfA=a.locator('.board-pdf[aria-label="problems.pdf"]:visible')

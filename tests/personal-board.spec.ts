@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 
 test('an intentionally cleared personal board stays empty after reload',async({page})=>{
- await page.goto('/')
+ await page.goto('/board')
  const shapes=page.locator('[data-shape-id]')
  await expect.poll(()=>shapes.count()).toBeGreaterThanOrEqual(10)
  await page.locator('.tl-canvas').click({position:{x:900,y:800}})

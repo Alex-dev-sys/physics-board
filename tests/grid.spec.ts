@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 
 test('grid visibility and snapping can be changed independently and survive reload', async ({ page }) => {
-  await page.goto(process.env.TEST_BASE_URL || '/')
+  await page.goto(process.env.TEST_BASE_URL || '/board')
   await page.getByRole('button', { name: 'Фон и сетка' }).click()
   const menu = page.getByRole('dialog', { name: 'Фон и сетка' })
   const grid = page.locator('.tl-background__wrapper .tl-grid')
@@ -39,7 +39,7 @@ test('grid visibility and snapping can be changed independently and survive relo
 })
 
 test('grid snapping changes the position of newly drawn shapes', async ({ page }) => {
-  await page.goto(process.env.TEST_BASE_URL || '/')
+  await page.goto(process.env.TEST_BASE_URL || '/board')
   await page.getByRole('button', { name: 'Фон и сетка' }).click()
   const menu = page.getByRole('dialog', { name: 'Фон и сетка' })
   await menu.getByRole('button', { name: 'Выключена' }).click()
