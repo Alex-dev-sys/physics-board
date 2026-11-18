@@ -118,8 +118,26 @@ test('a high-resolution PDF scan inserts a real image on the board', async ({ pa
 
  await page.goto('/')
  await expect(page.locator('.tl-canvas')).toBeVisible()
+ let releaseWorker: () => void
+ const workerReady = new Promise<void>(resolve => { releaseWorker = resolve })
+ await page.route('**/pdf.worker.min.mjs', async route => {
+  await workerReady
+  await route.continue()
+ })
  await page.locator('input[type=file]').setInputFiles({ name: 'scan.pdf', mimeType: 'application/pdf', buffer: Buffer.concat(pieces) })
+ const pdf = page.locator('[data-shape-type=pdf]')
+ try {
+  await expect(pdf.getByText('scan.pdf')).toBeVisible()
+  await expect(pdf.getByText('Обрабатывается…')).toBeVisible()
+ } finally {
+  releaseWorker()
+ }
+ await expect(pdf.locator('canvas')).toBeVisible()
+ await expect(page.getByRole('toolbar', { name: 'Действия с scan.pdf' })).toContainText('1 / 1')
+ await expect(page.locator('.media-window')).toHaveCount(0)
  await page.getByTitle('Добавить страницу на доску').click()
  await expect(page.locator('img.tl-image')).toHaveCount(1)
- await expect(page.getByText('Добавлено на доску', { exact: true })).toBeVisible()
+ await expect.poll(() => page.locator('img.tl-image').evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true)
+ await page.reload()
+ await expect(pdf.locator('canvas')).toBeVisible()
 })

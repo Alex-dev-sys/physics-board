@@ -1,0 +1,129 @@
+.board-pdf {
+ color: #242834;
+ font-family: Manrope, 'DM Sans', sans-serif;
+}
+
+.board-pdf-card {
+ display: flex;
+ align-items: center;
+ gap: 13px;
+ width: 100%;
+ height: 100%;
+ padding: 0 14px;
+ border: 1px solid #cdd0d7;
+ border-radius: 14px;
+ background: #fff;
+}
+
+.board-pdf-file {
+ position: relative;
+ display: grid;
+ place-items: center;
+ flex: 0 0 30px;
+ color: #e6e8f3;
+}
+
+.board-pdf-file svg { fill: currentColor; }
+.board-pdf-file b {
+ position: absolute;
+ bottom: 4px;
+ left: -2px;
+ padding: 4px 3px;
+ border-radius: 4px;
+ background: #eb303d;
+ color: #fff;
+ font-size: 8px;
+ line-height: 1;
+}
+
+.board-pdf-card-copy { display: grid; flex: 1; gap: 2px; min-width: 0; }
+.board-pdf-card-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 650; }
+.board-pdf-card-copy span { color: #606575; font-size: 12px; }
+.board-pdf-spinner { flex: none; color: #606575; animation: board-pdf-spin .85s linear infinite; }
+@keyframes board-pdf-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .board-pdf-spinner { animation: none; } }
+
+.board-pdf-paper {
+ position: relative;
+ display: grid;
+ place-items: center;
+ width: 100%;
+ height: 100%;
+ background: #fff;
+ box-shadow: 0 0 0 1px #83879530;
+}
+
+.board-pdf-paper[hidden] { display: none; }
+.board-pdf-paper > [role='status'] { position: absolute; padding: 8px; color: #606575; font-size: 12px; }
+.board-pdf-paper[aria-busy='true'] .board-pdf-sheet { visibility: hidden; }
+.board-pdf-sheet { position: relative; }
+.board-pdf-canvas { display: block; width: 100%; height: 100%; }
+.board-pdf-sheet.is-cropping { pointer-events: auto; cursor: crosshair; touch-action: none; }
+.board-pdf-crop { position: absolute; border: 1px solid #008de9; background: #008de933; pointer-events: none; }
+
+.board-pdf-handles > i {
+ position: absolute;
+ width: calc(9px * var(--tl-scale));
+ height: calc(9px * var(--tl-scale));
+ border: calc(1.5px * var(--tl-scale)) solid var(--tl-color-selection-stroke);
+ border-radius: calc(2px * var(--tl-scale));
+ background: #fff;
+ translate: -50% -50%;
+}
+
+.board-pdf-handles > i:nth-child(1) { left: 50%; top: 0; }
+.board-pdf-handles > i:nth-child(2) { left: 100%; top: 50%; }
+.board-pdf-handles > i:nth-child(3) { left: 50%; top: 100%; }
+.board-pdf-handles > i:nth-child(4) { left: 0; top: 50%; }
+@media (pointer: coarse) { .board-pdf-handles { display: none; } }
+
+.board-pdf-controls {
+ position: absolute;
+ z-index: var(--tl-layer-canvas-in-front);
+ pointer-events: none;
+ translate: -50% 0;
+ color: #242834;
+ width: min(566px, calc(100vw - 24px));
+ display: flex;
+ flex-direction: column;
+ align-items: center;
+ gap: 5px;
+}
+
+.board-pdf-toolbar, .board-pdf-menu, .board-pdf-action {
+ pointer-events: auto;
+ border: 1px solid #e2e4eb;
+ border-radius: 10px;
+ background: #fff;
+ box-shadow: 0 5px 18px #171a2720;
+}
+
+.board-pdf-toolbar { display: flex; align-items: stretch; max-width: 100%; min-height: 43px; }
+.board-pdf-title { width: 150px; align-self: center; padding: 0 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.board-pdf-tools { display: flex; align-items: center; gap: 2px; border-left: 1px solid #e8e9ed; padding: 3px 5px; }
+.board-pdf-tools button, .board-pdf-menu button, .board-pdf-action button {
+ display: grid;
+ place-items: center;
+ width: 34px;
+ height: 34px;
+ padding: 0;
+ border: 0;
+ border-radius: 6px;
+ color: #232731;
+ background: transparent;
+}
+
+.board-pdf-controls button:not(:disabled):hover, .board-pdf-controls button[aria-pressed='true'] { background: #eceef2; }
+.board-pdf-controls button:disabled { opacity: .38; cursor: default; }
+.board-pdf-count { min-width: 46px; text-align: center; white-space: nowrap; font-size: 12px; font-variant-numeric: tabular-nums; }
+.board-pdf-menu { align-self: flex-end; padding: 4px; }
+.board-pdf-menu button, .board-pdf-action button { display: flex; justify-content: center; gap: 6px; width: auto; padding: 0 9px; font-size: 12px; }
+.board-pdf-action { display: flex; align-items: center; gap: 8px; padding: 4px 8px; font-size: 11px; white-space: nowrap; }
+
+@media (max-width: 580px) {
+ .board-pdf-toolbar { flex-wrap: wrap; justify-content: center; }
+ .board-pdf-title { width: 100%; text-align: center; padding: 5px 8px 0; }
+ .board-pdf-tools { border-left: 0; padding: 3px 1px; gap: 0; }
+ .board-pdf-tools button { width: 29px; }
+ .board-pdf-count { min-width: 36px; }
+}

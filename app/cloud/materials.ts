@@ -22,7 +22,6 @@ export class CloudMaterials {
   return uploadRoomMaterial(this.roomId,material,this.client)
  }
  publish(item:SharedMaterial){if(!isSharedMaterial(item,this.roomId))throw new Error('Некорректный файл');this.doc.transact(()=>this.materials.set(item.id,item),'material')}
- setPage(id:string,page:number){const item=this.materials.get(id);if(item&&Number.isInteger(page)&&page>=1&&page<=100000)this.doc.transact(()=>this.materials.set(id,{...item,page}),'material')}
  close(id:string){this.doc.transact(()=>this.materials.delete(id),'material')}
  resolve(path:string){return getRoomMaterialUrl(this.roomId,path,this.client)}
  async discard(path:string){await this.client.storage.from('board-materials').remove([path])}

@@ -88,6 +88,77 @@ test('an image already on the personal board remains visible in the local room',
  await first.close();await second.close()
 })
 
+test('a dropped PDF moves and resizes on the board and shares its current page', async ({ browser, page }) => {
+ const generator = await browser.newPage()
+ await generator.setContent('<h1>Условие</h1><h1 style="break-before:page">Решение</h1>')
+ const file = await generator.pdf({ format: 'A4' })
+ await generator.close()
+ await page.addInitScript(() => { localStorage.setItem('physics-board-initialized-v1', '1') })
+ await page.goto('/')
+ const surface = page.locator('.tl-canvas')
+ await expect(surface).toBeVisible()
+ await surface.evaluate((element, encoded) => {
+  const transfer = new DataTransfer()
+  const bytes = Uint8Array.from(atob(encoded), byte => byte.charCodeAt(0))
+  transfer.items.add(new File([bytes], 'task.pdf', { type: 'application/pdf' }))
+  element.dispatchEvent(new DragEvent('drop', { bubbles: true, clientX: 600, clientY: 450, dataTransfer: transfer }))
+ }, file.toString('base64'))
+ const pdf = page.locator('.board-pdf:visible')
+ const canvas = pdf.locator('canvas')
+ await expect(canvas).toBeVisible()
+ const toolbar = page.getByRole('toolbar', { name: 'Действия с task.pdf' })
+ await expect(toolbar).toContainText('1 / 2')
+ const original = (await canvas.boundingBox())!
+ expect(original.x + original.width / 2).toBeCloseTo(600, 0)
+ expect(original.y + original.height / 2).toBeCloseTo(450, 0)
+ await page.mouse.move(600, 450)
+ await page.mouse.down()
+ await page.mouse.move(655, 490, { steps: 5 })
+ await page.mouse.up()
+ await expect.poll(async () => (await canvas.boundingBox())!.x).toBeGreaterThan(original.x + 30)
+ const handle = (await page.getByTestId('selection.resize.bottom-right').boundingBox())!
+ await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2)
+ await page.mouse.down()
+ await page.mouse.move(handle.x + 53, handle.y + 73, { steps: 5 })
+ await page.mouse.up()
+ await expect.poll(async () => (await canvas.boundingBox())!.width).toBeGreaterThan(original.width + 20)
+
+ await toolbar.getByTitle('Показать карточку PDF').click()
+ await expect(pdf.locator('.board-pdf-card')).toBeVisible()
+ await expect(canvas).toBeHidden()
+ await toolbar.getByTitle('Показать страницу PDF').click()
+ await expect(canvas).toBeVisible()
+ await toolbar.getByTitle('Следующая страница').click()
+ await expect(canvas).toHaveAttribute('aria-label', 'task.pdf, страница 2')
+ await expect(canvas).toBeVisible()
+ const downloadPromise = page.waitForEvent('download')
+ await toolbar.getByTitle('Скачать PDF').click()
+ expect((await downloadPromise).suggestedFilename()).toBe('task.pdf')
+
+ await page.getByRole('button', { name: 'Локальная комната' }).click()
+ await expect(page.getByText('Комната на этом компьютере')).toBeVisible()
+ const peer = await browser.newPage({ viewport: { width: 1500, height: 1100 } })
+ try {
+  await peer.goto(page.url())
+  const otherCanvas = peer.locator('.board-pdf canvas')
+  await expect(otherCanvas).toBeVisible()
+  await expect(otherCanvas).toHaveAttribute('aria-label', 'task.pdf, страница 2')
+  const bounds = (await otherCanvas.boundingBox())!
+  await peer.mouse.click(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
+  await peer.getByTitle('Предыдущая страница').click()
+  await expect(canvas).toHaveAttribute('aria-label', 'task.pdf, страница 1')
+  await peer.getByTitle('Вырезать фрагмент').click()
+  await peer.mouse.move(bounds.x + 40, bounds.y + 95)
+  await peer.mouse.down()
+  await peer.mouse.move(bounds.x + 150, bounds.y + 180, { steps: 4 })
+  await peer.mouse.up()
+  await peer.getByRole('button', { name: 'На доску', exact: true }).click()
+  await expect(page.locator('img.tl-image:visible')).toHaveCount(1)
+ } finally {
+  await peer.close()
+ }
+})
+
 
 
 

@@ -1,7 +1,8 @@
 'use client'
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { Tldraw, Editor, createShapesForAssets, DEFAULT_MAX_ASSET_SIZE, DefaultColorStyle, DefaultDashStyle, DefaultSizeStyle, GeoShapeGeoStyle, react as reactToState, toRichText, useEditor, useValue, type TLGridProps } from 'tldraw'
-import PdfViewer from './pdf-viewer'
+import { addPdfToBoard, pdfShapeUtils } from './pdf-shape'
+import { isPdfAsset, isPdfFile, removeUnusedPdfAssets } from './pdf-assets'
 import { PixelEraser } from './pixel-eraser'
 import { insertPhysicsPreset, type Preset } from './physics-presets'
 import { SyncCanvas, createLocalRoom } from './sync-canvas'
@@ -12,7 +13,7 @@ import type { CloudSyncStatus } from './cloud/update-log'
 import type { CloudMaterials, SharedMaterial } from './cloud/materials'
 import { ArrowDownLeft, ArrowLeft, ArrowRight, ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, Circle, Download, Eraser, FileText, Grid2X2, Hand, Highlighter, Image as ImageIcon, Link2, LockKeyhole, Minus, MoreHorizontal, MousePointer2, MoveUpRight, PanelRightClose, Paperclip, Pen, Pin, PinOff, Plus, Redo2, Search, Settings2, Shapes, Sparkles, Square, Trash2, Type, Undo2, Upload, Users, X, ZoomIn, ZoomOut } from 'lucide-react'
 
-type Media = { id:string; scope?:string; name:string; url:string; type:string; minimized:boolean; pinned?:boolean; x:number; y:number; page?:number; shared?:boolean; path?:string; refreshAt?:number; upload?:'uploading'|'failed' }
+type Media = { id:string; scope?:string; name:string; url:string; type:string; minimized:boolean; pinned?:boolean; x:number; y:number; shared?:boolean; path?:string; refreshAt?:number; upload?:'uploading'|'failed' }
 const tools = [
   {id:'select', label:'Выбор', icon:MousePointer2, key:'V'}, {id:'hand', label:'Перемещение', icon:Hand, key:'H'},
   {id:'draw', label:'Карандаш', icon:Pen, key:'P'}, {id:'highlight', label:'Маркер', icon:Highlighter, key:'B'},
@@ -109,6 +110,7 @@ export default function Board(){
   if(!ed.root.children?.['pixel-eraser'])ed.root.addChild(PixelEraser)
   ed.updateInstanceState({isGridMode:localStorage.getItem('physics-board-grid-snap')!=='false'})
   setEditor(ed)
+  if(new URLSearchParams(location.search).has('pdf'))ed.navigateToDeepLink({param:'pdf'})
  },[])
  const mountPersonal=useCallback((ed:Editor)=>{
   personalEditor.current=ed
@@ -131,30 +133,42 @@ export default function Board(){
    }
  },[mount])
  const choose=(id:string)=>{setActive(id);editor?.setCurrentTool(id==='eraser'&&eraserMode==='partial'?'pixel-eraser':id);setMenu(['draw','highlight','eraser','arrow','geo','text'].includes(id)?id:null)}
- const addFiles=(files:FileList|File[])=>{
-  const accepted=Array.from(files).filter(file=>cloudToken?materialTypes.has(file.type):file.type.startsWith('image/')||file.type==='application/pdf')
+ const addFiles=(files:FileList|File[], drop?:{x:number;y:number})=>{
+  const accepted=Array.from(files).filter(file=>isPdfFile(file)||(cloudToken?materialTypes.has(file.type):file.type.startsWith('image/')))
   if(!accepted.length){setNotice('Выберите поддерживаемое изображение или PDF');return}
-  const added=accepted.map((file,index)=>{
+  const pictures=accepted.filter(file=>!isPdfFile(file))
+  const pdfs=accepted.filter(isPdfFile)
+  if(pdfs.length){
+   if(!editor||editor.isDisposed)setNotice('Доска ещё загружается')
+   else {
+    const bounds=editor.getViewportScreenBounds()
+    const panelWidth=panel && bounds.w>650 ? (bounds.w>900 ? 296 : 249) : 0
+    const center=editor.screenToPage(drop??{x:bounds.x+(bounds.w-panelWidth)/2,y:bounds.center.y+24})
+    pdfs.forEach((file,index)=>{void addPdfToBoard(editor,file,{x:center.x+index*24,y:center.y+index*24}).catch(error=>setNotice(error.message))})
+    setMenu(null)
+   }
+  }
+  if(!pictures.length)return
+  const added=pictures.map((file,index)=>{
    const url=URL.createObjectURL(file)
    urls.current.push(url)
    return {id:crypto.randomUUID(),scope:cloudToken??room??undefined,name:file.name,url,type:file.type,
-    minimized:false,x:window.innerWidth-520-index*25,y:100+index*25,page:1}
+    minimized:false,x:window.innerWidth-520-index*25,y:100+index*25}
   })
   setMedia(current=>[...current,...added])
   const api=materialApi.current
-  if(api)accepted.forEach((file,index)=>{void publishMaterial(api,added[index].id,file,1).catch(error=>setNotice(error.message))})
+  if(api)pictures.forEach((file,index)=>{void publishMaterial(api,added[index].id,file).catch(error=>setNotice(error.message))})
  }
  const patch=(id:string, changes:Partial<Media>)=>setMedia(m=>m.map(item=>item.id===id?{...item,...changes}:item))
  const focusMedia=(id:string)=>setMedia(current=>{const index=current.findIndex(item=>item.id===id);if(index<0||index===current.length-1)return current;const next=current.slice();const [item]=next.splice(index,1);next.push(item);return next})
- const publishMaterial=async(api:CloudMaterials,id:string,file:File,page:number)=>{
+ const publishMaterial=async(api:CloudMaterials,id:string,file:File)=>{
   if(materialApi.current!==api||cancelledMaterials.current.has(id))return
   patch(id,{upload:'uploading'})
   let path:string|undefined
   try{
    path=await api.upload(file)
    if(materialApi.current!==api||cancelledMaterials.current.has(id)){await api.discard(path);return}
-   const current=mediaRef.current.find(item=>item.id===id)
-   api.publish({id,name:file.name.slice(0,255),type:file.type,path,page:current?.page||page})
+   api.publish({id,name:file.name.slice(0,255),type:file.type,path,page:1})
    patch(id,{upload:undefined})
   }catch{
    if(path)await api.discard(path)
@@ -170,7 +184,7 @@ export default function Board(){
   desiredMaterials.current=desired
   setMedia(current=>current.filter(item=>item.scope!==cloudToken||!item.shared||desired.has(item.id)).map(item=>{
    const shared=item.scope===cloudToken&&desired.get(item.id)
-   return shared?{...item,shared:true,page:shared.page,upload:undefined}:item
+   return shared?{...item,shared:true,upload:undefined}:item
   }))
   for(const item of items){
    if(mediaRef.current.some(value=>value.id===item.id)||loadingMaterials.current.has(item.id))continue
@@ -179,7 +193,7 @@ export default function Board(){
     const latest=desiredMaterials.current.get(item.id)
     if(materialApi.current!==api||!latest)return
     setMedia(current=>current.some(value=>value.id===item.id)?current:[...current,{
-     id:latest.id,scope:cloudToken,name:latest.name,type:latest.type,url,page:latest.page,shared:true,
+     id:latest.id,scope:cloudToken,name:latest.name,type:latest.type,url,shared:true,
      path:latest.path,refreshAt:Date.now()+45*60_000,minimized:false,x:window.innerWidth-520,y:100,
     }])
    }).catch(()=>{if(materialApi.current===api)setNotice('Не удалось открыть «'+item.name+'»')})
@@ -195,7 +209,7 @@ export default function Board(){
    const response=await fetch(item.url)
    if(!response.ok)throw new Error()
    const blob=await response.blob()
-   await publishMaterial(api,item.id,new File([blob],item.name,{type:item.type}),item.page||1)
+   await publishMaterial(api,item.id,new File([blob],item.name,{type:item.type}))
   }catch(error){
    if(materialApi.current!==api||cancelledMaterials.current.has(item.id))throw error
    patch(item.id,{upload:'failed'})
@@ -273,11 +287,12 @@ export default function Board(){
   if(!editor||creatingRoom)return
   setCreatingRoom(true)
   try{
-   const original=editor.store.getStoreSnapshot()
+   const original=structuredClone(editor.store.getStoreSnapshot())
+   removeUnusedPdfAssets(original)
    const initial=structuredClone(original)
    for(const record of Object.values(initial.store)){
     if(record.typeName==='asset'&&record.type==='video')throw new Error('Перенос видео в облачную комнату пока не поддерживается')
-    if(record.typeName==='asset'&&record.type==='image')record.props.src=null
+    if(record.typeName==='asset'&&(record.type==='image'||isPdfAsset(record)))record.props.src=null
    }
    const created=await createCloudRoom(initial)
    const snapshot=await prepareCloudSnapshot(editor,created.id,original)
@@ -316,10 +331,10 @@ export default function Board(){
  }
  const cloudState=(status:CloudSyncStatus|'loading'|'failed')=>{setCloudStatus(status);if(status==='failed'){setCreatingRoom(false);pendingCloudShare.current=false}}
  const cloudLabel=cloudStatus==='saved'?'Сохранено в облаке':cloudStatus==='syncing'?'Сохранение…':cloudStatus==='offline'?'Нет соединения':cloudStatus==='error'?'Ошибка сохранения':cloudStatus==='failed'?'Ошибка подключения':'Подключение…'
- return <main className="workspace" data-background={background} data-grid={grid ? "visible" : "hidden"} data-grid-style={gridStyle} onDragEnter={e=>{e.preventDefault();dragDepth.current++;setDragging(true)}} onDragOver={e=>e.preventDefault()} onDragLeave={e=>{e.preventDefault();dragDepth.current--;if(dragDepth.current<=0){dragDepth.current=0;setDragging(false)}}} onDrop={e=>{e.preventDefault();dragDepth.current=0;setDragging(false);addFiles(e.dataTransfer.files)}}>
+ return <main className="workspace" data-background={background} data-grid={grid ? "visible" : "hidden"} data-grid-style={gridStyle} onDragEnter={e=>{e.preventDefault();dragDepth.current++;setDragging(true)}} onDragOver={e=>e.preventDefault()} onDragLeave={e=>{e.preventDefault();dragDepth.current--;if(dragDepth.current<=0){dragDepth.current=0;setDragging(false)}}} onDropCapture={e=>{dragDepth.current=0;setDragging(false);if(!Array.from(e.dataTransfer.files).some(isPdfFile))return;e.preventDefault();e.stopPropagation();addFiles(e.dataTransfer.files,{x:e.clientX,y:e.clientY})}} onDrop={e=>{e.preventDefault();if(e.dataTransfer.files.length)addFiles(e.dataTransfer.files)}}>
   <div className="canvas" ref={canvasContainer}>
    {(!room&&!cloudToken||personalEditor.current)&&<div className="personal-canvas" inert={!!(room||cloudToken)} style={{visibility:room||cloudToken?'hidden':undefined}}>
-    <Tldraw licenseKey={process.env.NEXT_PUBLIC_TLDRAW_LICENSE_KEY} hideUi components={canvasComponents} persistenceKey="physics-board-v1" onMount={mountPersonal}/>
+    <Tldraw licenseKey={process.env.NEXT_PUBLIC_TLDRAW_LICENSE_KEY} hideUi components={canvasComponents} persistenceKey="physics-board-v1" shapeUtils={pdfShapeUtils} onMount={mountPersonal}/>
    </div>}
    {cloudToken?<CloudCanvas key={cloudToken} token={cloudToken} onMount={mount} components={canvasComponents} onStatus={cloudState} onReady={cloudReady} onMaterials={receiveMaterials}/>:room?<SyncCanvas token={room} onMount={mount} components={canvasComponents}/>:null}
   </div>
@@ -331,10 +346,10 @@ export default function Board(){
   <div className="bottom-center glass"><button title="Уменьшить" onClick={()=>{editor?.zoomOut()}}><Minus size={17}/></button><button className="zoom" title="Показать всю доску" onClick={()=>{editor?.zoomToFit()}}>Вписать</button><button title="Увеличить" onClick={()=>{editor?.zoomIn()}}><Plus size={17}/></button></div>
   <div className="bottom-hint"><span>✦</span> Пространство для больших идей</div>
   <input ref={input} type="file" accept="image/*,application/pdf" multiple hidden onChange={e=>{if(e.target.files)addFiles(e.target.files);e.target.value=''}}/>
-  {media.map(m=><div className="media-window glass" key={m.id} onPointerDownCapture={e=>{if(!(e.target as HTMLElement).closest('button'))focusMedia(m.id)}} onClickCapture={e=>{if((e.target as HTMLElement).closest('button'))focusMedia(m.id)}} style={{'--media-x':m.x+'px','--media-y':m.y+'px',zIndex:m.pinned?32:30,display:m.minimized?'none':undefined} as React.CSSProperties}><div className="media-header" onPointerDown={e=>move(e,m.id)}><FileText size={16}/><strong>{m.name}</strong>{m.upload==='uploading'&&<span className="media-upload">Загрузка…</span>}{m.upload==='failed'&&<button className="retry-upload" onClick={()=>void retryMaterial(m).catch(error=>setNotice(error.message))}>Повторить загрузку</button>}<button title={m.pinned?'Открепить окно':'Закрепить поверх окон'} aria-label={m.pinned?'Открепить окно':'Закрепить поверх окон'} aria-pressed={!!m.pinned} onClick={()=>patch(m.id,{pinned:!m.pinned})}>{m.pinned?<PinOff size={16}/>:<Pin size={16}/>}</button><button title="Свернуть" onClick={()=>patch(m.id,{minimized:true})}><Minus size={16}/></button><button title={m.shared?'Закрыть для всех':'Закрыть'} onClick={()=>closeMedia(m.id)}><X size={16}/></button></div>{m.type==='application/pdf'?<PdfViewer url={m.url} onInsert={insertImage} sharedPage={m.page} onPageChange={page=>{patch(m.id,{page});if(m.shared)materialApi.current?.setPage(m.id,page)}}/>:<><div className="image-preview"><img src={m.url} alt={m.name}/></div><div className="media-footer">Изображение <button onClick={()=>{void insertLocalImage(m.url).catch(()=>setNotice('Не удалось добавить изображение'))}}>На доску</button></div></>}</div>)}
+  {media.map(m=><div className="media-window glass" key={m.id} onPointerDownCapture={e=>{if(!(e.target as HTMLElement).closest('button'))focusMedia(m.id)}} onClickCapture={e=>{if((e.target as HTMLElement).closest('button'))focusMedia(m.id)}} style={{'--media-x':m.x+'px','--media-y':m.y+'px',zIndex:m.pinned?32:30,display:m.minimized?'none':undefined} as React.CSSProperties}><div className="media-header" onPointerDown={e=>move(e,m.id)}><FileText size={16}/><strong>{m.name}</strong>{m.upload==='uploading'&&<span className="media-upload">Загрузка…</span>}{m.upload==='failed'&&<button className="retry-upload" onClick={()=>void retryMaterial(m).catch(error=>setNotice(error.message))}>Повторить загрузку</button>}<button title={m.pinned?'Открепить окно':'Закрепить поверх окон'} aria-label={m.pinned?'Открепить окно':'Закрепить поверх окон'} aria-pressed={!!m.pinned} onClick={()=>patch(m.id,{pinned:!m.pinned})}>{m.pinned?<PinOff size={16}/>:<Pin size={16}/>}</button><button title="Свернуть" onClick={()=>patch(m.id,{minimized:true})}><Minus size={16}/></button><button title={m.shared?'Закрыть для всех':'Закрыть'} onClick={()=>closeMedia(m.id)}><X size={16}/></button></div><div className="image-preview"><img src={m.url} alt={m.name}/></div><div className="media-footer">Изображение <button onClick={()=>{void insertLocalImage(m.url).catch(()=>setNotice('Не удалось добавить изображение'))}}>На доску</button></div></div>)}
   {media.some(m=>m.minimized)&&<div className="dock glass">{media.filter(m=>m.minimized).map(m=><button key={m.id} onClick={()=>{patch(m.id,{minimized:false});focusMedia(m.id)}}><FileText size={15}/>{m.name}</button>)}</div>}
   {licenseBlocked&&<div className="license-notice" role="alert"><div><strong>Доска временно недоступна</strong><p>Лицензия редактора не активна. Пожалуйста, сообщите владельцу доски.</p></div></div>}
-  {creatingRoom&&<div className="room-creating" role="status">Создаём комнату и сохраняем материалы…</div>}{shareOpen&&cloudToken&&<div className="modal-backdrop" onClick={()=>setShareOpen(false)}><section className="share-dialog" role="dialog" aria-modal="true" aria-label="Пригласить на доску" onClick={e=>e.stopPropagation()}><div className="formula-heading"><h2>Пригласить на доску</h2><button aria-label="Закрыть" onClick={()=>setShareOpen(false)}><X size={18}/></button></div><p>Любой, у кого есть ссылка, сможет открыть и редактировать эту доску.</p><input aria-label="Ссылка на доску" readOnly value={`${location.origin}${location.pathname}#cloud=${cloudToken}`} onFocus={e=>e.currentTarget.select()}/>{['localhost','127.0.0.1'].includes(location.hostname)&&<p>Сейчас адрес ведёт на этот компьютер. Для доступа с других устройств нужно опубликовать приложение.</p>}<div className="formula-actions"><button onClick={()=>setShareOpen(false)}>Закрыть</button><button className="primary" onClick={()=>{void navigator.clipboard?.writeText(`${location.origin}${location.pathname}#cloud=${cloudToken}`).then(()=>setNotice('Ссылка скопирована')).catch(()=>setNotice('Скопируйте ссылку из поля'))}}>Копировать ссылку</button></div></section></div>}{dragging&&<div className="drop-overlay"><div><Upload size={30}/><strong>Отпустите файл здесь</strong><span>PDF или изображение откроется рядом с доской</span></div></div>}{notice&&<div className="toast">{notice}</div>}
+  {creatingRoom&&<div className="room-creating" role="status">Создаём комнату и сохраняем материалы…</div>}{shareOpen&&cloudToken&&<div className="modal-backdrop" onClick={()=>setShareOpen(false)}><section className="share-dialog" role="dialog" aria-modal="true" aria-label="Пригласить на доску" onClick={e=>e.stopPropagation()}><div className="formula-heading"><h2>Пригласить на доску</h2><button aria-label="Закрыть" onClick={()=>setShareOpen(false)}><X size={18}/></button></div><p>Любой, у кого есть ссылка, сможет открыть и редактировать эту доску.</p><input aria-label="Ссылка на доску" readOnly value={`${location.origin}${location.pathname}#cloud=${cloudToken}`} onFocus={e=>e.currentTarget.select()}/>{['localhost','127.0.0.1'].includes(location.hostname)&&<p>Сейчас адрес ведёт на этот компьютер. Для доступа с других устройств нужно опубликовать приложение.</p>}<div className="formula-actions"><button onClick={()=>setShareOpen(false)}>Закрыть</button><button className="primary" onClick={()=>{void navigator.clipboard?.writeText(`${location.origin}${location.pathname}#cloud=${cloudToken}`).then(()=>setNotice('Ссылка скопирована')).catch(()=>setNotice('Скопируйте ссылку из поля'))}}>Копировать ссылку</button></div></section></div>}{dragging&&<div className="drop-overlay"><div><Upload size={30}/><strong>Отпустите файл здесь</strong><span>PDF появится на доске</span></div></div>}{notice&&<div className="toast">{notice}</div>}
  </main>
 }
 

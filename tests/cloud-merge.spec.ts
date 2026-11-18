@@ -4,7 +4,8 @@ import * as Y from 'yjs'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { POST } from '../app/api/board-sync/route'
 import { publishCloudUpdate } from '../app/cloud/publish'
-import { bindCloudStore, seedCloudDocument, validateCloudDocument } from '../app/cloud/store-binding'
+import { bindCloudStore, moveLegacyPdfsToBoard, seedCloudDocument, validateCloudDocument } from '../app/cloud/store-binding'
+import { createBoardSchema } from '../app/pdf-schema.mjs'
 import { encodeUpdate, unsavedUpdate, updatePartSize } from '../app/cloud/wire'
 
 globalThis.requestAnimationFrame ??= callback =>
@@ -67,6 +68,34 @@ test('a new seed materializes a complete board before a client opens it', () => 
   store.put([document, page])
   seedCloudDocument(doc, store.getStoreSnapshot())
   expect(validateCloudDocument(doc)).toMatchObject({ [document.id]: document, [page.id]: page })
+ } finally {
+  doc.destroy()
+  store.dispose()
+ }
+})
+
+test('an existing cloud PDF becomes one board object and retains its file and page', () => {
+ const room = 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa'
+ const id = 'bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb'
+ const path = `${room}/${id}.pdf`
+ const doc = new Y.Doc()
+ const store = createTLStore({ schema: createBoardSchema() })
+ try {
+  const document = DocumentRecordType.create({ id: TLDOCUMENT_ID })
+  const page = PageRecordType.create({ id: PageRecordType.createId('page'), name: 'Page 1', index: 'a1' as IndexKey })
+  store.put([document, page])
+  seedCloudDocument(doc, store.getStoreSnapshot())
+  const unbind = bindCloudStore(doc, store)
+  try {
+   doc.getMap('materials').set(id, { id, name: 'old.pdf', type: 'application/pdf', path, page: 3 })
+   moveLegacyPdfsToBoard(doc, room)
+   moveLegacyPdfsToBoard(doc, room)
+   expect(doc.getMap('materials').has(id)).toBe(false)
+   const shapes = store.allRecords().filter(record => record.typeName === 'shape')
+   expect(shapes).toEqual([expect.objectContaining({ type: 'pdf', props: expect.objectContaining({ page: 3 }) })])
+   const file = store.allRecords().find(record => record.typeName === 'asset')
+   expect(file).toMatchObject({ props: { title: 'old.pdf', src: `asset:cloud/${path}` } })
+  } finally { unbind() }
  } finally {
   doc.destroy()
   store.dispose()

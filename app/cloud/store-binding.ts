@@ -1,13 +1,18 @@
 import * as Y from 'yjs'
-import { createTLSchema, type TLRecord, type TLStore } from '@tldraw/tlschema'
+import { AssetRecordType, createShapeId, type TLRecord, type TLStore } from '@tldraw/tlschema'
+import { getIndexAbove } from '@tldraw/utils'
 import type { TLStoreSnapshot } from 'tldraw'
+import { createBoardSchema } from '../pdf-schema.mjs'
+import { createPdfAsset, pdfMimeType, pdfWidth } from '../pdf-assets'
+import { isSharedMaterial, type SharedMaterial } from './material-data'
 
 type LegacyRecord = { key: string; val: TLRecord }
 type FieldValue = [unknown] | []
 const delimiter = '\u001f'
-const schema = createTLSchema()
+const schema = createBoardSchema()
 const recordRoots = new Set(['tl_records', 'tl_base', 'tl_fields'])
 const validFields = new Set(['x', 'y', 'rotation', 'index', 'parentId', 'opacity', 'isLocked', 'name', 'fromId', 'toId', 'gridSize'])
+const pdfMigration = Symbol('pdf-migration')
 
 function recordMaps(doc: Y.Doc) {
  return {
@@ -89,6 +94,33 @@ export function validateCloudDocument(doc: Y.Doc, allowEmpty = false) {
  return records
 }
 
+export function moveLegacyPdfsToBoard(doc: Y.Doc, roomId: string) {
+ const materials = doc.getMap('materials')
+ const pdfs = [...materials.values()].filter((value): value is SharedMaterial => isSharedMaterial(value, roomId) && value.type === pdfMimeType)
+ if (!pdfs.length) return
+ const records = readCloudRecords(doc)
+ const page = Object.values(records).find(record => record.typeName === 'page')
+ if (page?.typeName !== 'page') return
+ let topIndex = Object.values(records).flatMap(record => record.typeName === 'shape' && record.parentId === page.id ? [record.index] : []).sort().pop()
+ const { base } = recordMaps(doc)
+ doc.transact(() => {
+  pdfs.sort((a, b) => a.id.localeCompare(b.id)).forEach((material, offset) => {
+   const id = createShapeId(`pdf-${material.id}`)
+   const asset = createPdfAsset(material.name, `asset:cloud/${material.path}`, AssetRecordType.createId(`pdf-${material.id}`))
+   if (!base.has(id) && !records[id]) {
+    topIndex = getIndexAbove(topIndex)
+    const shape = schema.types.shape.create({
+     id, type: 'pdf', parentId: page.id, index: topIndex, x: 230 + offset * 24, y: 330 + offset * 24,
+     props: { assetId: asset.id, page: material.page, w: pdfWidth, h: 0, compact: false },
+    })
+    base.set(asset.id, asset)
+    base.set(id, shape)
+   }
+   materials.delete(material.id)
+  })
+ }, pdfMigration)
+}
+
 function writeFields(fields: Y.Map<FieldValue>, before: TLRecord, after: TLRecord) {
  const previous = before as unknown as Record<string, unknown>
  const current = after as unknown as Record<string, unknown>
@@ -134,7 +166,7 @@ export function bindCloudStore(doc: Y.Doc, store: TLStore): () => void {
  }, { source: 'user', scope: 'document' })
 
  const apply = (transaction: Y.Transaction) => {
-  if (transaction.local) return
+  if (transaction.local && transaction.origin !== pdfMigration) return
   const baseChanges = transaction.changed.get(base)
   const fieldChanges = transaction.changed.get(fields)
   const legacyChanged = transaction.changed.has(legacy)

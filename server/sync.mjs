@@ -5,6 +5,7 @@ import { resolve, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { WebSocketServer } from 'ws'
 import { NodeSqliteWrapper, SQLiteSyncStorage, TLSocketRoom } from '@tldraw/sync-core'
+import { createBoardSchema } from '../app/pdf-schema.mjs'
 
 // This single-process server is for local development. It binds to loopback only.
 const root = resolve(process.env.BOARD_ROOM_DIR || '.rooms')
@@ -25,6 +26,7 @@ function loadRoom(token) {
     const storage = new SQLiteSyncStorage({ sql: new NodeSqliteWrapper(db) })
     const room = new TLSocketRoom({
       storage,
+      schema: createBoardSchema(),
       onSessionRemoved(current, { numSessionsRemaining }) {
         if (numSessionsRemaining === 0) {
           current.close()
@@ -92,7 +94,7 @@ const server = createServer(async (req, res) => {
       const dir = assetDir(token), file = join(dir, path[2])
       if (req.method === 'PUT') {
         const type = (req.headers['content-type'] || '').split(';')[0]
-        if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(type)) return reply(res, 415, { error: 'unsupported_type' })
+        if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf'].includes(type)) return reply(res, 415, { error: 'unsupported_type' })
         const data = await readBody(req, 10 * 1024 * 1024)
         mkdirSync(dir, { recursive: true })
         writeFileSync(file, data, { flag: 'wx' })

@@ -2,13 +2,16 @@
 import { useEffect, useState } from 'react'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import * as Y from 'yjs'
-import { Tldraw, createTLStore, defaultShapeUtils, defaultBindingUtils, getUserPreferences, getDefaultUserPresence, InstancePresenceRecordType, react, type Editor, type TLAssetStore, type TLComponents, type TLInstancePresence, type TLStore, type TLStoreSnapshot } from 'tldraw'
+import { Tldraw, createTLStore, getUserPreferences, getDefaultUserPresence, InstancePresenceRecordType, react, type Editor, type TLAssetStore, type TLComponents, type TLInstancePresence, type TLStore, type TLStoreSnapshot } from 'tldraw'
 import { getCloudClient } from './client'
 import { CloudRoomNotFound, resolveCloudRoom, getRoomMaterialUrl, uploadRoomMaterial } from './rooms'
 import { CloudUpdateLog, type CloudSyncStatus } from './update-log'
-import { bindCloudStore, validateCloudDocument } from './store-binding'
+import { bindCloudStore, moveLegacyPdfsToBoard, validateCloudDocument } from './store-binding'
 import { CloudMaterials, type SharedMaterial } from './materials'
 import { uuidPattern } from './wire'
+import { isPdfAsset } from '../pdf-assets'
+import { pdfShapeUtils } from '../pdf-shape'
+import { createBoardSchema } from '../pdf-schema.mjs'
 
 function cachedRoom(key: string): string | null {
  try {
@@ -62,7 +65,7 @@ export function CloudCanvas({token,onMount,components,onStatus,onReady,onMateria
       return src?.startsWith('asset:cloud/') ? getRoomMaterialUrl(room, src.slice(12), client).catch(() => null) : src
      },
     }
-    const boardStore = createTLStore({ shapeUtils: defaultShapeUtils, bindingUtils: defaultBindingUtils, assets })
+    const boardStore = createTLStore({ schema: createBoardSchema(), assets })
     let previousPeers = new Set<TLInstancePresence['id']>()
     let verified = !savedRoom
     const active = new CloudUpdateLog(client, room, document, async () => {
@@ -76,6 +79,7 @@ export function CloudCanvas({token,onMount,components,onStatus,onReady,onMateria
      if (disposed) return
      if (unbind) boardStore._flushHistory()
      Y.applyUpdate(document, update, origin)
+     moveLegacyPdfsToBoard(document, room)
      try { localStorage.setItem(key, room) } catch { /* Storage may be unavailable. */ }
      mountStore()
     }, peers => {
@@ -92,6 +96,7 @@ export function CloudCanvas({token,onMount,components,onStatus,onReady,onMateria
 
     function mountStore() {
      if (unbind) return
+     moveLegacyPdfsToBoard(document, room)
      unbind = bindCloudStore(document, boardStore)
      const presenceId = InstancePresenceRecordType.createId(crypto.randomUUID())
      stopPresence = react('sync cloud presence', () => {
@@ -138,18 +143,18 @@ export function CloudCanvas({token,onMount,components,onStatus,onReady,onMateria
  },[token])
  if(error)return <div className="sync-status" role="alert">{error}</div>
  if(!store)return <div className="sync-status" role="status">Подключение к облачной комнате…</div>
- return <Tldraw licenseKey={process.env.NEXT_PUBLIC_TLDRAW_LICENSE_KEY} hideUi store={store} components={components} onMount={onMount}/>
+ return <Tldraw licenseKey={process.env.NEXT_PUBLIC_TLDRAW_LICENSE_KEY} hideUi store={store} shapeUtils={pdfShapeUtils} components={components} onMount={onMount}/>
 }
 
-/** Copy all image assets to the private bucket before publishing an invitation. */
+/** Copy files on the board to the private bucket before publishing an invitation. */
 export async function prepareCloudSnapshot(editor:Editor,roomId:string,snapshot:TLStoreSnapshot):Promise<TLStoreSnapshot>{
  const copy=structuredClone(snapshot)
  for(const record of Object.values(copy.store)){
-  if(record.typeName!=='asset'||record.type!=='image')continue
+  if(record.typeName!=='asset'||(record.type!=='image'&&!isPdfAsset(record)))continue
   const url=await editor.resolveAssetUrl(record.id,{shouldResolveToOriginal:true})
-  if(!url)throw new Error('Не удалось найти изображение на доске')
+  if(!url)throw new Error('Не удалось найти файл на доске')
   const response=await fetch(url)
-  if(!response.ok)throw new Error('Не удалось прочитать изображение на доске')
+  if(!response.ok)throw new Error('Не удалось прочитать файл на доске')
   const blob=await response.blob()
   const path=await uploadRoomMaterial(roomId,blob)
   record.props.src=`asset:cloud/${path}`
